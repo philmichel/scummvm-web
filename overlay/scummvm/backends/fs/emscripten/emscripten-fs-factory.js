@@ -26,7 +26,7 @@
 mergeInto(LibraryManager.library, {
     $DAVFS__deps: ['$FS', '$MEMFS'],
     $DAVFS: {
-        mountPoint: '/home/web_user',
+        mountPoint: null,
         remoteRoot: '/persist',
         requestTimeoutMs: 15000,
         retryDelayMs: 5000,
@@ -562,7 +562,15 @@ mergeInto(LibraryManager.library, {
             return DAVFS.pullPromise;
         },
 
-        initialize: async function() {
+        initialize: async function(configPath) {
+            const segments = configPath.split('/');
+            if (segments[0] !== '' || segments.length < 3 ||
+                    segments.slice(1).some(function(segment) {
+                        return segment === '' || segment === '.' || segment === '..';
+                    })) {
+                throw new Error('DAVFS received an invalid config path: ' + configPath);
+            }
+            DAVFS.mountPoint = '/' + segments.slice(1, -1).join('/');
             FS.mkdirTree(DAVFS.mountPoint);
             FS.mount(DAVFS, {}, DAVFS.mountPoint);
             DAVFS.initializing = true;
@@ -589,13 +597,12 @@ mergeInto(LibraryManager.library, {
         }
     },
 
-    EmscriptenFilesystemFactory_initDefaultConfigFile__deps: ['$DAVFS'],
+    EmscriptenFilesystemFactory_initDefaultConfigFile__deps: ['$DAVFS', '$UTF8ToString'],
     EmscriptenFilesystemFactory_initDefaultConfigFile__async: true,
     EmscriptenFilesystemFactory_initDefaultConfigFile: (pathPtr) => Asyncify.handleSleep((wakeUp) => {
         // The container entrypoint seeds the remote configuration; there is no
         // browser-side fallback to a bundled scummvm.ini.
-        void pathPtr;
-        DAVFS.initialize().then(function() {
+        DAVFS.initialize(UTF8ToString(pathPtr)).then(function() {
             wakeUp();
         }, function(error) {
             // A partial or missing pull must never let native startup continue.

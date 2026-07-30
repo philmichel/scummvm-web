@@ -43,14 +43,22 @@ jobs:
             exit 0
           fi
 
-          overlay_status='Overlay checksum is unchanged.'
-          upstream_checksum=$(curl --fail --silent --show-error --location \
-            "https://raw.githubusercontent.com/chkuendig/scummvm/$scummvm_sha/backends/fs/emscripten/emscripten-fs-factory.js" \
-            | sha256sum | cut -d' ' -f1)
-          expected_checksum=$(cut -d' ' -f1 overlay/checksums.sha256)
-          if [[ "$upstream_checksum" != "$expected_checksum" ]]; then
-            overlay_status='Overlay rebase required: the upstream filesystem factory changed.'
-          fi
+          overlay_status='Overlay checksums are unchanged.'
+          while read -r expected_checksum overlay_path; do
+            [[ -n "$expected_checksum" ]] || continue
+            if [[ "$overlay_path" != scummvm/* ]]; then
+              echo "Unsupported overlay checksum path: $overlay_path" >&2
+              exit 1
+            fi
+            upstream_path=${overlay_path#scummvm/}
+            upstream_checksum=$(curl --fail --silent --show-error --location \
+              "https://raw.githubusercontent.com/chkuendig/scummvm/$scummvm_sha/$upstream_path" \
+              | sha256sum | cut -d' ' -f1)
+            if [[ "$upstream_checksum" != "$expected_checksum" ]]; then
+              overlay_status="Overlay rebase required: upstream $upstream_path changed."
+              break
+            fi
+          done < overlay/checksums.sha256
 
           sed -i "s/^SCUMMVM_DEMO_SHA=.*/SCUMMVM_DEMO_SHA=$demo_sha/" versions.env
           sed -i "s/^SCUMMVM_SHA=.*/SCUMMVM_SHA=$scummvm_sha/" versions.env

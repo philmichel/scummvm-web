@@ -39,6 +39,13 @@ fi
 
 if [ ! -d "$GAMES_DIR" ]; then
     log "WARNING: $GAMES_DIR does not exist; the generated game indexes will be empty"
+else
+    game_symlink=
+    if ! game_symlink=$(find "$GAMES_DIR" -type l -print -quit 2>/dev/null); then
+        log "WARNING: $GAMES_DIR could not be checked for symbolic links"
+    elif [ -n "$game_symlink" ]; then
+        log "WARNING: symbolic links under $GAMES_DIR are unsupported and will not be served"
+    fi
 fi
 
 if [ "$persist_writable" -eq 1 ]; then

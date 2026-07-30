@@ -61,10 +61,9 @@ rm -f "$output/data/gui-icons.dat"
 python3 "$scummvm/dists/emscripten/build-make_http_index.py" "$output/data"
 
 assets=(
-    games.css games.html games.js games-full.html games-limited.html
-    games-v2.css games-v2.js metadata.json main.css heroes0.png heroes1.png
-    heroes2.png heroes3.png heroes4.png heroes5.png heroes6.png maniac-half.png
-    scummvm.png scummvm_logo.png
+    games.css games.html games.js main.css heroes0.png heroes1.png heroes2.png
+    heroes3.png heroes4.png heroes5.png heroes6.png maniac-half.png scummvm.png
+    scummvm_logo.png
 )
 for asset in "${assets[@]}"; do
     cp "$demo/assets/$asset" "$output/"

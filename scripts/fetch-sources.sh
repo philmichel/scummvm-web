@@ -32,3 +32,7 @@ shopt -s nullglob
 for patch in /workspace/patches/*.patch; do
     git -C "$destination/scummvm" apply --3way "$patch"
 done
+
+for patch in /workspace/patches/scummvm-demo/*.patch; do
+    git -C "$destination/scummvm-demo" apply "$patch"
+done

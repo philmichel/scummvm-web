@@ -10,18 +10,18 @@ on:
     inputs:
       checkout_ref:
         description: Git ref to validate without publishing
-        required: false
+        required: true
         type: string
 
 permissions:
   contents: read
 
-concurrency:
-  group: build-${{ inputs.checkout_ref || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   validate:
+    if: github.event_name == 'pull_request' || inputs.checkout_ref != ''
+    concurrency:
+      group: validate-${{ inputs.checkout_ref || github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -73,7 +73,9 @@ jobs:
       inputs.checkout_ref == '' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: validate
+    concurrency:
+      group: publish-${{ github.repository }}-${{ github.sha }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -87,6 +89,9 @@ jobs:
       - name: Load source versions
         run: cat versions.env >> "$GITHUB_ENV"
 
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests/unit -v
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
@@ -97,27 +102,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare image tags
-        id: tags
+      - name: Prepare candidate image
+        id: image
         shell: bash
         run: |
-          calver=$(date -u +%Y.%-m.%-d)
-          short_sha=${GITHUB_SHA::12}
-          {
-            echo 'value<<EOF'
-            echo "ghcr.io/${GITHUB_REPOSITORY,,}:latest"
-            echo "ghcr.io/${GITHUB_REPOSITORY,,}:$calver"
-            echo "ghcr.io/${GITHUB_REPOSITORY,,}:$calver-r${GITHUB_RUN_NUMBER}"
-            echo "ghcr.io/${GITHUB_REPOSITORY,,}:sha-$short_sha"
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          echo "candidate=$image:candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish image
+      - name: Build candidate image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: true
-          tags: ${{ steps.tags.outputs.value }}
+          tags: ${{ steps.image.outputs.candidate }}
           build-args: |
             SCUMMVM_DEMO_SHA=${{ env.SCUMMVM_DEMO_SHA }}
             SCUMMVM_SHA=${{ env.SCUMMVM_SHA }}
@@ -125,5 +124,70 @@ jobs:
             EMSDK_VERSION=${{ env.EMSDK_VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: true
+          provenance: mode=max
           sbom: true
+
+      - name: Fetch test game
+        run: tests/fetch-fixture.sh
+
+      - name: Pull candidate by digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: docker pull "$IMAGE@$DIGEST"
+
+      - name: Run smoke tests against candidate digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: SCUMMVM_IMAGE="$IMAGE@$DIGEST" docker compose --file tests/compose.yaml run --rm smoke
+
+      - name: Reject persistence symlinks in candidate
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: SCUMMVM_IMAGE="$IMAGE@$DIGEST" tests/test-persist-symlink.sh
+
+      - name: Stop test stack
+        if: always()
+        run: docker compose --file tests/compose.yaml down --volumes
+
+      - name: Promote tested digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.image.outputs.name }}
+        shell: bash
+        run: |
+          calver=$(date -u +%Y.%-m.%-d)
+          short_sha=${GITHUB_SHA::12}
+          version_tags=(
+            "$IMAGE:$calver-r$GITHUB_RUN_NUMBER"
+            "$IMAGE:sha-$short_sha"
+          )
+          tag_args=()
+          for tag in "${version_tags[@]}"; do
+            tag_args+=(--tag "$tag")
+          done
+          docker buildx imagetools create "${tag_args[@]}" \
+            "$IMAGE@$DIGEST"
+
+          current_main=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [[ "$current_main" == "$GITHUB_SHA" ]]; then
+            mutable_tags=("$IMAGE:latest" "$IMAGE:$calver")
+            docker buildx imagetools create \
+              --tag "${mutable_tags[0]}" --tag "${mutable_tags[1]}" \
+              "$IMAGE@$DIGEST"
+          else
+            echo "Skipping mutable tags because main advanced to $current_main"
+            mutable_tags=()
+          fi
+
+          for tag in "${version_tags[@]}" "${mutable_tags[@]}"; do
+            promoted=$(docker buildx imagetools inspect "$tag" \
+              --format '{{json .Manifest}}' | jq --raw-output .digest)
+            if [[ "$promoted" != "$DIGEST" ]]; then
+              echo "$tag resolved to $promoted instead of $DIGEST" >&2
+              exit 1
+            fi
+          done

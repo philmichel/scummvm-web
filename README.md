@@ -14,7 +14,8 @@ Cloud storage and Sentry integration are not included.
 
 The container listens on port 8080 and runs as UID/GID 1000. The games mount is
 read-only; all game directories and files must be readable by 1000. The
-persistence mount must be writable by 1000.
+persistence mount must be writable by 1000. Symbolic links under the games
+mount are unsupported: indexing skips them and nginx refuses to serve them.
 
 ```bash
 mkdir -p ./games ./persist
@@ -67,6 +68,10 @@ Failure to load the authoritative persistence tree stops browser startup rather
 than silently running on an ephemeral filesystem. Runtime upload failures are
 shown to the user and retried.
 
+DAVFS persists creation, writable-stream close, memory-map synchronization,
+rename, and deletion operations. A standalone Emscripten `FS.truncate()` call
+that is not followed by a writable stream close is not synchronized.
+
 The `/persist/` endpoint permits destructive WebDAV operations. Protect the
 site with authentication at a reverse proxy or with a trusted network boundary.
 The container refuses to start if the persistence tree contains symbolic links,
@@ -102,8 +107,10 @@ workflow merges it. The bot then explicitly dispatches the main-branch publish
 workflow. The DAVFS overlay is guarded by the SHA-256 of the original upstream
 file, so an upstream edit fails visibly and requires an explicit rebase.
 
-Images are published to `ghcr.io/philmichel/scummvm-web` as `latest`,
-`YYYY.M.D`, `YYYY.M.D-r<run>`, and `sha-<commit>` tags with provenance and SBOM
+The main workflow pushes one uniquely tagged candidate, tests that exact
+registry digest, and only then promotes the same OCI index. Images are
+published to `ghcr.io/philmichel/scummvm-web` as `latest`, `YYYY.M.D`,
+`YYYY.M.D-r<run>`, and `sha-<commit>` tags with provenance and SBOM
 attestations.
 
 ## Tests

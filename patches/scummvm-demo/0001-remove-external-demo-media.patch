@@ -1,0 +1,58 @@
+diff --git a/assets/games.js b/assets/games.js
+--- a/assets/games.js
++++ b/assets/games.js
+@@ -842,18 +842,12 @@ class FeatureModal {
+ 			graphics: {
+ 				title: 'Graphics',
+ 				description: 'WebGL - incl. shader filters from libretro, GRIM and other 3D engines or engines relying on OpenGL (Thimbleweed Park, Myst, Riven, etc).',
+-				media: [
+-					{ type: 'image', url: 'https://christian.kuendig.info/posts/2024-01-scummvm-part3/scummvm-ft-demo-00003.png', label: 'Shader Support' }
+-				]
++				media: []
+ 			},
+ 			storage: {
+ 				title: 'Storage',
+-				description: 'Drag & Drop your local games into the launcher, access many freeware and demo versions directly from this server, or use the Full Cloud support - play games directly from Dropbox, Google Drive, Box or OneDrive and synchronize save games via ScummVM Cloud. Files (logs, screenshots etc.) can directly be exported.',
+-				media: [
+-					{ type: 'youtube', url: 'https://www.youtube.com/watch?v=kYechxc5tvE&t=16s', label: 'Cloud Support' },
+-					{ type: 'video', url: 'https://christian.kuendig.info/posts/2024-01-scummvm-part3/screenshots.mp4', label: 'Export Screenshots' },
+-					{ type: 'video', url: 'https://christian.kuendig.info/posts/2024-01-scummvm-part3/openlog.mp4', label: 'Export Logfiles' }
+-				]
++				description: 'Games are loaded from the server-mounted library. Configuration, savegames, and extras are synchronized with server-backed persistence.',
++				media: []
+ 			},
+ 			controls: {
+ 				title: 'Flexible Controls',
+diff --git a/assets/games.html b/assets/games.html
+index db603a5..b280c93 100644
+--- a/assets/games.html
++++ b/assets/games.html
+@@ -32,8 +32,8 @@
+                 <div class="col-1-1">
+                     <div class="content" style="margin: 8px;">
+                         <h1>ScummVM for the Web</h1>
+-                        <p>ScummVM is a program which allows you to run certain classic graphical adventure and role-playing games. ScummVM is a complete rewrite of these games' executables and is not an emulator. ScummVM replaces the executables shipped with the games, allowing you to play them on systems for which they were never designed. One such system is the web browser, and this demo site lets you try a selection of games directly in your browser using ScummVM!</p>
+-                        <p>You can play some of the games already added when launching ScummVM, or you can connect to your cloud storage (Dropbox, Google Drive, Box, and OneDrive) and even play commercial games you bought while synchronizing saved games across devices. For more information, visit the <a href="https://www.scummvm.org/" target="_blank" rel="noopener">main ScummVM website</a>.</p>
++                        <p>ScummVM is a program which allows you to run certain classic graphical adventure and role-playing games. ScummVM is a complete rewrite of these games' executables and is not an emulator. ScummVM replaces the executables shipped with the games, allowing you to play them on systems for which they were never designed. One such system is the web browser, and this self-hosted site lets you play games from a server-mounted library.</p>
++                        <p>Configuration, savegames, and extras are synchronized with server-backed persistence. For more information, visit the <a href="https://www.scummvm.org/" target="_blank" rel="noopener">main ScummVM website</a>.</p>
+ 
+                         <div id="downloadContainer" style="max-width: 400px; margin: 20px auto;">
+                             <a id="downloadButton" href="scummvm.html">
+@@ -58,7 +58,7 @@
+                                 </div>
+                                 <div class="feature-card" data-feature="storage">
+                                     <h3>Storage</h3>
+-                                    <p>Local drag & drop, server-hosted demos, and full cloud storage integration with save sync.</p>
++                                    <p>Server-hosted games with persistent configuration, savegames, and extras.</p>
+                                 </div>
+                                 <div class="feature-card" data-feature="controls">
+                                     <h3>Flexible Controls</h3>
+@@ -93,7 +93,7 @@
+                        
+ 
+                         <h1>Games Showcase</h1>
+-                        <p>Browse our curated set of freeware demos and community classics you can try instantly in your browser, powered by ScummVM.</p>
++                        <p>Browse the games detected in the mounted server library and launch them directly in your browser.</p>
+ 
+                         <div id="loading" class="loading">Loading games data...</div>
+ 

@@ -47,6 +47,19 @@ test('serves the app, games, ranges, and WebDAV persistence', async ({ page, req
   const catalog = await catalogResponse.json();
   expect(catalog.some((game: { id: string }) => game.id === 'sky:sky')).toBe(true);
 
+  await page.goto('/games.html');
+  const gameLink = page.locator('a.game-entry[href*="/data/games/"]').first();
+  await expect(gameLink).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/cloud storage/i);
+  expect(await gameLink.getAttribute('href')).toContain('scummvm.html#--path=/data/games/');
+  const gamesScript = await request.get('/games.js');
+  expect(await gamesScript.text()).not.toMatch(/kuendig\.(?:io|info)|Full Cloud support/);
+  expect((await request.get('/games-limited.html')).status()).toBe(404);
+  expect((await request.get('/games-full.html')).status()).toBe(404);
+  expect((await request.get('/games-v2.css')).status()).toBe(404);
+  expect((await request.get('/games-v2.js')).status()).toBe(404);
+  expect((await request.get('/metadata.json')).status()).toBe(404);
+
   const put = await request.put('/persist/smoke.txt', { data: 'persisted' });
   expect(put.ok()).toBe(true);
   const persisted = await request.get('/persist/smoke.txt');
@@ -74,6 +87,8 @@ test('serves the app, games, ranges, and WebDAV persistence', async ({ page, req
   await expect(page.locator('#canvas')).toBeVisible();
   await page.waitForTimeout(10_000);
   expect(fatalErrors).toEqual([]);
+
+  expect(await page.evaluate(() => (window as any).DAVFS.mountPoint)).toBe('/home/web_user');
 
   const configResponse = await request.get('/persist/scummvm.ini');
   expect(configResponse.status()).toBe(200);
