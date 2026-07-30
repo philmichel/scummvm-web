@@ -1,0 +1,124 @@
+name: Watch upstream
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  update:
+    outputs:
+      pull_request_branch: ${{ steps.pull_request.outputs['pull-request-branch'] }}
+      pull_request_head_sha: ${{ steps.pull_request.outputs['pull-request-head-sha'] }}
+      pull_request_number: ${{ steps.pull_request.outputs['pull-request-number'] }}
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Update source pins
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source versions.env
+          demo_sha=$(gh api repos/chkuendig/scummvm-demo/commits/main --jq .sha)
+          scummvm_sha=$(gh api "repos/chkuendig/scummvm-demo/contents/scummvm?ref=$demo_sha" --jq .sha)
+          icons_sha=$(gh api "repos/chkuendig/scummvm-demo/contents/scummvm-icons?ref=$demo_sha" --jq .sha)
+
+          if [[ "$demo_sha" == "$SCUMMVM_DEMO_SHA" \
+              && "$scummvm_sha" == "$SCUMMVM_SHA" \
+              && "$icons_sha" == "$SCUMMVM_ICONS_SHA" ]]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          overlay_status='Overlay checksum is unchanged.'
+          upstream_checksum=$(curl --fail --silent --show-error --location \
+            "https://raw.githubusercontent.com/chkuendig/scummvm/$scummvm_sha/backends/fs/emscripten/emscripten-fs-factory.js" \
+            | sha256sum | cut -d' ' -f1)
+          expected_checksum=$(cut -d' ' -f1 overlay/checksums.sha256)
+          if [[ "$upstream_checksum" != "$expected_checksum" ]]; then
+            overlay_status='Overlay rebase required: the upstream filesystem factory changed.'
+          fi
+
+          sed -i "s/^SCUMMVM_DEMO_SHA=.*/SCUMMVM_DEMO_SHA=$demo_sha/" versions.env
+          sed -i "s/^SCUMMVM_SHA=.*/SCUMMVM_SHA=$scummvm_sha/" versions.env
+          sed -i "s/^SCUMMVM_ICONS_SHA=.*/SCUMMVM_ICONS_SHA=$icons_sha/" versions.env
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          echo "overlay_status=$overlay_status" >> "$GITHUB_OUTPUT"
+
+      - name: Create update pull request
+        if: steps.update.outputs.changed == 'true'
+        id: pull_request
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          token: ${{ github.token }}
+          base: main
+          branch: bump/upstream
+          delete-branch: true
+          commit-message: 'chore(upstream): update ScummVM sources'
+          title: 'chore(upstream): update ScummVM sources'
+          body: |
+            Updates the pinned demo, ScummVM, and icon repositories to the gitlinks on upstream `main`.
+
+            ${{ steps.update.outputs.overlay_status }}
+
+  validate:
+    needs: update
+    if: needs.update.outputs.pull_request_head_sha != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml
+    with:
+      checkout_ref: ${{ needs.update.outputs.pull_request_head_sha }}
+
+  merge:
+    needs: [update, validate]
+    if: needs.update.outputs.pull_request_number != ''
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge validated update and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr merge --repo "$GITHUB_REPOSITORY" --squash --delete-branch \
+            --match-head-commit "${{ needs.update.outputs.pull_request_head_sha }}" \
+            "${{ needs.update.outputs.pull_request_number }}"
+
+          merged=false
+          for attempt in {1..60}; do
+            state=$(gh pr view --repo "$GITHUB_REPOSITORY" \
+              "${{ needs.update.outputs.pull_request_number }}" \
+              --json state --jq .state)
+            if [[ "$state" == MERGED ]]; then
+              merged=true
+              break
+            fi
+            if [[ "$state" == CLOSED ]]; then
+              echo 'Upstream update PR closed without merging' >&2
+              exit 1
+            fi
+            echo "Waiting for upstream update PR to merge ($attempt/60)"
+            sleep 10
+          done
+          if [[ "$merged" != true ]]; then
+            echo 'Timed out waiting for upstream update PR to merge' >&2
+            exit 1
+          fi
+
+          gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main

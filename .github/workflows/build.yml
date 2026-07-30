@@ -1,0 +1,129 @@
+name: Build, test, and publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Git ref to validate without publishing
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ inputs.checkout_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+
+      - name: Load source versions
+        run: cat versions.env >> "$GITHUB_ENV"
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests/unit -v
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build test image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          load: true
+          tags: scummvm-web:test
+          build-args: |
+            SCUMMVM_DEMO_SHA=${{ env.SCUMMVM_DEMO_SHA }}
+            SCUMMVM_SHA=${{ env.SCUMMVM_SHA }}
+            SCUMMVM_ICONS_SHA=${{ env.SCUMMVM_ICONS_SHA }}
+            EMSDK_VERSION=${{ env.EMSDK_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Fetch test game
+        run: tests/fetch-fixture.sh
+
+      - name: Run smoke tests
+        run: docker compose --file tests/compose.yaml run --rm smoke
+
+      - name: Reject persistence symlinks
+        run: tests/test-persist-symlink.sh
+
+      - name: Stop test stack
+        if: always()
+        run: docker compose --file tests/compose.yaml down --volumes
+
+  publish:
+    if: >-
+      inputs.checkout_ref == '' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: validate
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Load source versions
+        run: cat versions.env >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image tags
+        id: tags
+        shell: bash
+        run: |
+          calver=$(date -u +%Y.%-m.%-d)
+          short_sha=${GITHUB_SHA::12}
+          {
+            echo 'value<<EOF'
+            echo "ghcr.io/${GITHUB_REPOSITORY,,}:latest"
+            echo "ghcr.io/${GITHUB_REPOSITORY,,}:$calver"
+            echo "ghcr.io/${GITHUB_REPOSITORY,,}:$calver-r${GITHUB_RUN_NUMBER}"
+            echo "ghcr.io/${GITHUB_REPOSITORY,,}:sha-$short_sha"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.value }}
+          build-args: |
+            SCUMMVM_DEMO_SHA=${{ env.SCUMMVM_DEMO_SHA }}
+            SCUMMVM_SHA=${{ env.SCUMMVM_SHA }}
+            SCUMMVM_ICONS_SHA=${{ env.SCUMMVM_ICONS_SHA }}
+            EMSDK_VERSION=${{ env.EMSDK_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true

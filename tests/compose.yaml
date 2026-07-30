@@ -1,0 +1,42 @@
+services:
+  scummvm:
+    image: ${SCUMMVM_IMAGE:-scummvm-web:test}
+    read_only: true
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./fixtures/games:/games:ro
+      - ./fixtures/persist:/persist
+      - cache:/var/cache/scummvm
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')
+      interval: 5s
+      timeout: 3s
+      retries: 120
+      start_period: 10s
+
+  smoke:
+    image: mcr.microsoft.com/playwright:v1.62.0-noble
+    depends_on:
+      scummvm:
+        condition: service_healthy
+    working_dir: /work
+    environment:
+      BASE_URL: http://scummvm:8080
+    volumes:
+      - ./package.json:/work/package.json:ro
+      - ./package-lock.json:/work/package-lock.json:ro
+      - ./playwright.config.ts:/work/playwright.config.ts:ro
+      - ./smoke.spec.ts:/work/smoke.spec.ts:ro
+      - node_modules:/work/node_modules
+    command: sh -c 'npm ci --ignore-scripts && npx playwright test'
+
+volumes:
+  cache:
+  node_modules:
