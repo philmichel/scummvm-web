@@ -14,6 +14,7 @@ configure_flags=(
     --default-dynamic
     --enable-a52
     --enable-faad
+    --enable-flac
     --enable-fluidlite
     --enable-freetype2
     --enable-fribidi
@@ -73,3 +74,7 @@ cp /workspace/scummvm.ini.default "$output/scummvm.ini.default"
 
 jq -e '.games == {} and ([.. | objects | .baseUrl? // empty] | length == 0)' \
     "$output/data/index.json" >/dev/null
+
+# FLAC-compressed speech/music (.sof, .flac) is common in talkie packages;
+# fail the build if the decoder did not make it into the binary.
+grep -qa 'FLAC__' "$output/scummvm.wasm"

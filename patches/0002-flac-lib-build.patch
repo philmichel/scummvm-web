@@ -1,0 +1,42 @@
+--- a/dists/emscripten/build.sh
++++ b/dists/emscripten/build.sh
+@@ -70,6 +70,7 @@
+ _fribidi=false
+ _liba52=false
+ _libfaad=false
++_libflac=false
+ _libmad=false
+ _libmpcdec=false
+ _libmpeg2=false
+@@ -89,6 +90,10 @@
+     _libfaad=true
+     CONFIGURE_ARGS+=" $i"
+     ;;
++  --enable-flac)
++    _libflac=true
++    CONFIGURE_ARGS+=" $i"
++    ;;
+   --enable-fluidlite)
+     _fluidlite=true
+     CONFIGURE_ARGS+=" $i"
+@@ -237,6 +242,20 @@
+   LIBS_FLAGS="${LIBS_FLAGS} --with-faad-prefix=$LIBS_FOLDER/build"
+ fi
+ 
++if [ "$_libflac" = true ]; then
++  if [[ ! -f "$LIBS_FOLDER/build/lib/libFLAC.a" ]]; then
++    echo "building flac-1.4.3"
++    cd "$LIBS_FOLDER"
++    wget -nc --content-disposition "https://github.com/xiph/flac/releases/download/1.4.3/flac-1.4.3.tar.xz"
++    tar -xf flac-1.4.3.tar.xz
++    cd "$LIBS_FOLDER/flac-1.4.3/"
++    emcmake cmake -B "build/" -DCMAKE_INSTALL_PREFIX="$LIBS_FOLDER/build/" -DCMAKE_INSTALL_LIBDIR="lib" -DCMAKE_C_FLAGS="-fPIC -Oz" -DBUILD_SHARED_LIBS=OFF -DBUILD_CXXLIBS=OFF -DBUILD_PROGRAMS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DBUILD_DOCS=OFF -DWITH_OGG=OFF -DINSTALL_MANPAGES=OFF
++    cmake --build "build/"
++    cmake --install "build/"
++  fi
++  LIBS_FLAGS="${LIBS_FLAGS} --with-flac-prefix=$LIBS_FOLDER/build"
++fi
++
+ if [ "$_fluidlite" = true ]; then
+   if [[ ! -f "$LIBS_FOLDER/build/lib/libfluidlite.a" ]]; then
+     echo "building fluidlite-b0f187b"

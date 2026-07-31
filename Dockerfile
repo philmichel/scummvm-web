@@ -30,9 +30,9 @@ COPY --from=src /src/scummvm/dists/emscripten/ /bootstrap/dists/emscripten/
 WORKDIR /bootstrap
 RUN ./dists/emscripten/build.sh setup
 RUN ./dists/emscripten/build.sh libs \
-    --enable-a52 --enable-faad --enable-fluidlite --enable-fribidi \
-    --enable-mad --enable-mikmod --enable-mpcdec --enable-mpeg2 \
-    --enable-retrowave --enable-theoradec --enable-vpx
+    --enable-a52 --enable-faad --enable-flac --enable-fluidlite \
+    --enable-fribidi --enable-mad --enable-mikmod --enable-mpcdec \
+    --enable-mpeg2 --enable-retrowave --enable-theoradec --enable-vpx
 
 FROM toolchain AS build
 COPY --from=src /src/ /src/
