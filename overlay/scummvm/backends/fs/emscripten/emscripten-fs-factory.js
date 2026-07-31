@@ -597,6 +597,61 @@ mergeInto(LibraryManager.library, {
         }
     },
 
+    $VFSPREFETCH__deps: ['$FS'],
+    $VFSPREFETCH: {
+        // Background read-ahead for the chunked HTTP filesystem. Chunk-cache
+        // misses busy-wait inside ASYNCIFY suspensions (and can collide with
+        // audio-callback re-entry); prefetching the next chunk keeps reads
+        // warm. Initiating a fetch never suspends the wasm stack, so this is
+        // safe from any caller context. All failures are silent: the C++
+        // downloader remains authoritative when a prefetched chunk is absent.
+        inflight: new Set(),
+
+        prefetch: async function(url, chunkPath, start, length) {
+            if (VFSPREFETCH.inflight.has(chunkPath) || FS.analyzePath(chunkPath).exists) {
+                return;
+            }
+            VFSPREFETCH.inflight.add(chunkPath);
+            try {
+                const response = await fetch(url, {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    headers: { Range: 'bytes=' + start + '-' + (start + length - 1) }
+                });
+                if (response.status !== 206) {
+                    return; // server ignored the range request (or errored)
+                }
+                const body = new Uint8Array(await response.arrayBuffer());
+                if (body.length !== length) {
+                    return;
+                }
+                // Synchronous block from here: single-threaded, so the C++
+                // downloader cannot interleave between check and write. Bail
+                // if it already created the file or holds it open mid-write.
+                if (FS.analyzePath(chunkPath).exists) {
+                    return;
+                }
+                for (const stream of FS.streams) {
+                    if (stream && stream.path === chunkPath) {
+                        return;
+                    }
+                }
+                FS.mkdirTree(chunkPath.substring(0, chunkPath.lastIndexOf('/')));
+                FS.writeFile(chunkPath, body);
+            } catch (error) {
+                console.debug('VFSPREFETCH failed for', chunkPath, error);
+            } finally {
+                VFSPREFETCH.inflight.delete(chunkPath);
+            }
+        }
+    },
+
+    EmscriptenVirtualFS_prefetchChunk__deps: ['$VFSPREFETCH', '$UTF8ToString'],
+    EmscriptenVirtualFS_prefetchChunk__sig: 'vppdd',
+    EmscriptenVirtualFS_prefetchChunk: (urlPtr, pathPtr, chunkStart, chunkLength) => {
+        VFSPREFETCH.prefetch(UTF8ToString(urlPtr), UTF8ToString(pathPtr), chunkStart, chunkLength);
+    },
+
     EmscriptenFilesystemFactory_initDefaultConfigFile__deps: ['$DAVFS', '$UTF8ToString'],
     EmscriptenFilesystemFactory_initDefaultConfigFile__async: true,
     EmscriptenFilesystemFactory_initDefaultConfigFile: (pathPtr) => Asyncify.handleSleep((wakeUp) => {

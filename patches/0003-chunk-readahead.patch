@@ -1,0 +1,81 @@
+
+--- a/backends/fs/emscripten/http-readstream.cpp	2026-07-31 06:19:08.525398348 -0700
++++ b/backends/fs/emscripten/http-readstream.cpp	2026-07-31 06:19:28.038308574 -0700
+@@ -99,4 +99,22 @@
+ 	request->close();
+ }
+ 
++// Implemented as a JS library function (backends/fs/emscripten/emscripten-fs-factory.js):
++// starts a fire-and-forget background fetch of the given byte range into the
++// local chunk-cache path. Initiating the fetch never suspends the wasm stack,
++// so this is safe to call from any context; the download itself progresses
++// while the engine yields (e.g. in delayMillis).
++extern "C" void EmscriptenVirtualFS_prefetchChunk(const char *url, const char *cachePath, double chunkStart, double chunkLength);
++
++void HttpReadStream::hintPrefetch(uint32 chunkIndex) {
++	if (_singleFullFile || chunkIndex >= _numChunks || isChunkDownloaded(chunkIndex))
++		return;
++	uint64 chunkStart = (uint64)chunkIndex * CHUNK_SIZE;
++	uint64 chunkLength = CHUNK_SIZE;
++	if (chunkStart + chunkLength > _size)
++		chunkLength = _size - chunkStart;
++	EmscriptenVirtualFS_prefetchChunk(_url.c_str(), getChunkPath(chunkIndex).c_str(),
++	                                  (double)chunkStart, (double)chunkLength);
++}
++
+ #endif // EMSCRIPTEN
+
+--- a/backends/fs/emscripten/http-readstream.h	2026-07-31 06:19:08.522398208 -0700
++++ b/backends/fs/emscripten/http-readstream.h	2026-07-31 06:19:28.034308388 -0700
+@@ -40,6 +40,7 @@
+ 
+ protected:
+ 	virtual void downloadChunk(uint32 chunkIndex, uint64 chunkStart, uint64 chunkLength) override;
++	virtual void hintPrefetch(uint32 chunkIndex) override;
+ 
+ public:
+ 	HttpReadStream(const Common::String &url, const Common::String &displayName,
+
+--- a/backends/fs/emscripten/virtual-readstream.cpp	2026-07-31 06:19:08.519398068 -0700
++++ b/backends/fs/emscripten/virtual-readstream.cpp	2026-07-31 06:19:28.028308108 -0700
+@@ -203,6 +203,16 @@
+ 		// Re-check if chunk exists on disk (might have been downloaded by another stream instance in the meantime)
+ 		if (isChunkDownloaded(chunkIndex)) {
+ 			_downloadedChunks[chunkIndex] = true;
++			// The chunk was written by another stream instance or by a
++			// background prefetch; register it so LRU eviction accounts
++			// for it, and keep the read-ahead pipeline moving.
++			Common::String prefetchedPath = getChunkPath(chunkIndex);
++			Common::SeekableReadStream *onDisk = PosixIoStream::makeFromPath(prefetchedPath, StdioStream::WriteMode_Read);
++			if (onDisk) {
++				chunkCache().noteChunk(prefetchedPath, onDisk->size());
++				delete onDisk;
++			}
++			hintPrefetch(chunkIndex + 1);
+ 		} else {
+ 			// Calculate chunk range
+ 			uint64 chunkStart = chunkIndex * CHUNK_SIZE;
+@@ -232,6 +242,7 @@
+ 			if (actualSize == chunkLength) {
+ 				_downloadedChunks[chunkIndex] = true;
+ 				chunkCache().noteChunk(chunkPath, actualSize);
++				hintPrefetch(chunkIndex + 1);
+ 				debug(5, "VirtualReadStream: Chunk %u completed successfully (%llu bytes)", chunkIndex + 1, actualSize);
+ 			} else if (actualSize == _size) {
+ 				// Server sent the full file instead of just the chunk
+
+--- a/backends/fs/emscripten/virtual-readstream.h	2026-07-31 06:19:08.515397881 -0700
++++ b/backends/fs/emscripten/virtual-readstream.h	2026-07-31 06:19:28.031308248 -0700
+@@ -68,6 +68,12 @@
+ 	void ensureChunkDownloaded(uint32 chunkIndex);
+ 
+ 	/**
++	 * Hint that chunkIndex is likely to be read soon. Subclasses may start a
++	 * non-blocking background prefetch; the base implementation does nothing.
++	 */
++	virtual void hintPrefetch(uint32 chunkIndex) {}
++
++	/**
+ 	 * Session-wide LRU accounting for downloaded chunk files. The chunk cache
+ 	 * lives in MEMFS (i.e. on the wasm heap), so without a bound a long session
+ 	 * streaming a large game (voice files alone can be several hundred MB)

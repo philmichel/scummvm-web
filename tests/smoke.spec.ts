@@ -192,4 +192,18 @@ test('serves the app, games, ranges, and WebDAV persistence', async ({ page, req
   await page.waitForTimeout(5_000);
   expect(doubleSlashRequests).toEqual([]);
   expect(fatalErrors).toEqual([]);
+
+  // Read-ahead: booting the game reads chunk 1 of sky.dsk (8.8 MB = 2 chunks),
+  // which must trigger a background prefetch of chunk 2 into the chunk cache.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as any).FS.analyzePath('/.cache/data/games/BASS-Floppy-1.3/sky.dsk.002')
+              .exists,
+        ),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
 });
