@@ -169,4 +169,24 @@ test('serves the app, games, ranges, and WebDAV persistence', async ({ page, req
   expect(scriptResponse.headers()['cache-control']).toContain('no-cache');
   const wasmResponse = await request.get('/scummvm.wasm');
   expect(wasmResponse.headers()['cache-control']).toContain('no-cache');
+
+  // Regression: dlopen()ed engine plugins must load from clean origin-rooted
+  // URLs. Without the locateFile patch Emscripten requests
+  // "https://host//data/plugins/libsky.so" (double slash), which path-prefix
+  // auth proxies such as Envoy ext_authz mangle into an unservable path.
+  const doubleSlashRequests: string[] = [];
+  page.on('request', (pageRequest) => {
+    if (new URL(pageRequest.url()).pathname.startsWith('//')) {
+      doubleSlashRequests.push(pageRequest.url());
+    }
+  });
+  const pluginLoaded = page.waitForResponse(
+    (response) => response.url().endsWith('/data/plugins/libsky.so') && response.ok(),
+    { timeout: 90_000 },
+  );
+  await page.goto('/scummvm.html#--path=/data/games/BASS-Floppy-1.3 sky');
+  await pluginLoaded;
+  await page.waitForTimeout(5_000);
+  expect(doubleSlashRequests).toEqual([]);
+  expect(fatalErrors).toEqual([]);
 });

@@ -1,0 +1,16 @@
+--- a/dists/emscripten/custom_shell-pre.js	2026-07-31 03:03:35.503010646 -0700
++++ b/dists/emscripten/custom_shell-pre.js	2026-07-31 03:03:42.949345285 -0700
+@@ -1,6 +1,13 @@
+ /*global Module*/
+ Module["arguments"] = [];
+ 
++// dlopen()ed plugins pass absolute virtual-filesystem paths
++// ("/data/plugins/libscumm.so"). Emscripten's default locateFile blindly
++// prepends scriptDirectory, producing double-slash URLs ("https://host//data/…")
++// that reverse proxies with path-prefix auth (e.g. Envoy ext_authz) mangle.
++// Absolute paths are already origin-rooted and must be used verbatim.
++Module["locateFile"] = (path, prefix) => path.startsWith("/") ? path : prefix + path;
++
+ 
+ function httpShowProgressBar(filename) {
+ 	// Reset and initialize the progress bar
