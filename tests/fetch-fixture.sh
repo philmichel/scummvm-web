@@ -15,6 +15,11 @@ fi
 printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check
 unzip -oq "$archive" -d "$game_dir"
 chmod -R a+rX "$game_dir"
+# Second copy of the same game: detection must register both (regression for
+# ScummVM's same-target skip within a single recursive scan).
+copy_dir=$fixture_root/games/BASS-Floppy-1.3-second-copy
+rm -rf "$copy_dir"
+cp -R "$game_dir" "$copy_dir"
 ln -sfn /etc/passwd "$fixture_root/games/symlink-escape"
 if [[ $(stat -c %u "$fixture_root/persist") == "$(id -u)" ]]; then
     chmod 0777 "$fixture_root/persist"

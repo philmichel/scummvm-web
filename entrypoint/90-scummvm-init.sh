@@ -86,25 +86,47 @@ else
         log "ERROR: could not create a temporary directory; keeping existing configuration"
     else
         detect_timeout=${DETECT_TIMEOUT:-600}
-        log "Detecting games in $GAMES_DIR (timeout: $detect_timeout)"
-        if HOME="$detection_tmp" SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
-            timeout -- "$detect_timeout" "$SCUMMVM_BIN" \
-                --config="$detection_tmp/detected.ini" --add --recursive --path="$GAMES_DIR"; then
-            if [ -f "$detection_tmp/detected.ini" ]; then
-                if python3 "$SCRIPT_DIR/merge_ini.py" \
-                    --detected "$detection_tmp/detected.ini" \
-                    --target "$TARGET_INI" \
-                    --map "$GAMES_DIR=/data/games"; then
-                    log "Game detection completed and configuration was merged"
-                else
-                    log "ERROR: detected games could not be merged; existing configuration is unchanged"
-                fi
-            else
-                log "Game detection completed without producing a config; existing configuration is unchanged"
+        log "Detecting games in $GAMES_DIR (timeout per scan: $detect_timeout)"
+
+        # Detect into a fresh config, then merge into the persistent one.
+        # Returns non-zero only when the merge fails.
+        detect_and_merge() {
+            scan_path=$1
+            scan_config=$2
+            shift 2
+            if ! HOME="$detection_tmp" SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
+                timeout -- "$detect_timeout" "$SCUMMVM_BIN" \
+                    --config="$scan_config" --add "$@" --path="$scan_path"; then
+                log "WARNING: game detection failed for $scan_path; skipping it"
+                return 0
             fi
+            [ -f "$scan_config" ] || return 0
+            python3 "$SCRIPT_DIR/merge_ini.py" \
+                --detected "$scan_config" \
+                --target "$TARGET_INI" \
+                --map "$GAMES_DIR=/data/games"
+        }
+
+        # ScummVM's CLI mass-add skips a game whose preferred target name was
+        # already claimed earlier in the same scan (base/commandLine.cpp
+        # recAddGames), so one recursive pass silently drops additional copies
+        # of the same game. Scan each top-level directory in its own config;
+        # merge_ini disambiguates identical section names by path identity.
+        merge_failed=0
+        scan_index=0
+        for game_dir in "$GAMES_DIR"/*/; do
+            [ -d "$game_dir" ] || continue
+            scan_index=$((scan_index + 1))
+            detect_and_merge "${game_dir%/}" "$detection_tmp/detected-$scan_index.ini" \
+                --recursive || merge_failed=1
+        done
+        # Loose data files directly in the games root (no subdirectory).
+        detect_and_merge "$GAMES_DIR" "$detection_tmp/detected-root.ini" || merge_failed=1
+
+        if [ "$merge_failed" -eq 0 ]; then
+            log "Game detection completed and configuration was merged"
         else
-            status=$?
-            log "WARNING: game detection failed with status $status; existing configuration is unchanged"
+            log "ERROR: some detected games could not be merged; existing configuration was preserved"
         fi
     fi
 fi

@@ -45,7 +45,10 @@ test('serves the app, games, ranges, and WebDAV persistence', async ({ page, req
   const catalogResponse = await request.get('/games.json');
   expect(catalogResponse.status()).toBe(200);
   const catalog = await catalogResponse.json();
-  expect(catalog.some((game: { id: string }) => game.id === 'sky:sky')).toBe(true);
+  const skyEntries = catalog.filter((game: { id: string }) => game.id === 'sky:sky');
+  expect(skyEntries.length).toBeGreaterThanOrEqual(2);
+  const skyPaths = new Set(skyEntries.map((game: { relative_path: string }) => game.relative_path));
+  expect(skyPaths.size).toBe(skyEntries.length);
 
   await page.goto('/games.html');
   const gameLink = page.locator('a.game-entry[href*="/data/games/"]').first();
