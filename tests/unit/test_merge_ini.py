@@ -127,6 +127,98 @@ class MergeIniTests(unittest.TestCase):
         config = read_raw_config(self.target)
         self.assertEqual(config._sections["game"]["path"], "/data/games/final")
 
+    def test_copies_of_one_game_get_distinguishing_labels(self):
+        self.target.write_text(
+            "[monkey]\nengineid=scumm\ngameid=monkey\n"
+            "path=/data/games/Monkey Island - Talkie with Midi Music\n"
+            "description=The Secret of Monkey Island (DOS/English)\n",
+            encoding="utf-8",
+        )
+        self.detected.write_text(
+            "[monkey]\nengineid=scumm\ngameid=monkey\n"
+            "path=/games/Monkey Island - Talkie with Special Edition CD Tracks\n"
+            "description=The Secret of Monkey Island (DOS/English)\n",
+            encoding="utf-8",
+        )
+
+        merge_ini.merge_ini(
+            str(self.detected), str(self.target), [("/games", "/data/games")]
+        )
+
+        config = read_raw_config(self.target)
+        self.assertEqual(
+            config._sections["monkey"]["description"],
+            "The Secret of Monkey Island (DOS/English) [Midi Music]",
+        )
+        self.assertEqual(
+            config._sections["monkey-1"]["description"],
+            "The Secret of Monkey Island (DOS/English) [Special Edition CD Tracks]",
+        )
+
+    def test_labelling_is_idempotent_and_extends_to_later_copies(self):
+        self.target.write_text(
+            "[game]\nengineid=e\ngameid=g\npath=/data/games/One\ndescription=Game [One]\n"
+            "[game-1]\nengineid=e\ngameid=g\npath=/data/games/Two\ndescription=Game [Two]\n",
+            encoding="utf-8",
+        )
+        self.detected.write_text(
+            "[game]\nengineid=e\ngameid=g\npath=/games/Three\ndescription=Game\n",
+            encoding="utf-8",
+        )
+
+        merge_ini.merge_ini(
+            str(self.detected), str(self.target), [("/games", "/data/games")]
+        )
+        before = self.target.read_text(encoding="utf-8")
+        merge_ini.merge_ini(
+            str(self.detected), str(self.target), [("/games", "/data/games")]
+        )
+
+        config = read_raw_config(self.target)
+        self.assertEqual(config._sections["game"]["description"], "Game [One]")
+        self.assertEqual(config._sections["game-1"]["description"], "Game [Two]")
+        self.assertEqual(config._sections["game-2"]["description"], "Game [Three]")
+        self.assertEqual(self.target.read_text(encoding="utf-8"), before)
+
+    def test_letterless_remainder_falls_back_to_full_paths(self):
+        # Matches the smoke fixture: trimming the shared head would label the first
+        # copy "3", which says nothing on its own.
+        self.target.write_text(
+            "[sky]\nengineid=sky\ngameid=sky\n"
+            "path=/data/games/BASS-Floppy-1.3\ndescription=Steel Sky\n",
+            encoding="utf-8",
+        )
+        self.detected.write_text(
+            "[sky]\nengineid=sky\ngameid=sky\n"
+            "path=/games/BASS-Floppy-1.3-second-copy\ndescription=Steel Sky\n",
+            encoding="utf-8",
+        )
+
+        merge_ini.merge_ini(
+            str(self.detected), str(self.target), [("/games", "/data/games")]
+        )
+
+        config = read_raw_config(self.target)
+        self.assertEqual(config._sections["sky"]["description"], "Steel Sky [BASS-Floppy-1.3]")
+        self.assertEqual(
+            config._sections["sky-1"]["description"],
+            "Steel Sky [BASS-Floppy-1.3-second-copy]",
+        )
+
+    def test_distinct_descriptions_are_left_alone(self):
+        original = (
+            "[a]\nengineid=e\ngameid=g\npath=/data/games/A\ndescription=Alpha\n"
+            "[b]\nengineid=e\ngameid=h\npath=/data/games/B\ndescription=Beta\n"
+        )
+        self.target.write_text(original, encoding="utf-8")
+        self.detected.write_text("", encoding="utf-8")
+
+        merge_ini.merge_ini(
+            str(self.detected), str(self.target), [("/games", "/data/games")]
+        )
+
+        self.assertEqual(self.target.read_text(encoding="utf-8"), original)
+
 
 if __name__ == "__main__":
     unittest.main()

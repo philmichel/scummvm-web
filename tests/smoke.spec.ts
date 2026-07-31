@@ -49,6 +49,15 @@ test('serves the app, games, ranges, and WebDAV persistence', async ({ page, req
   expect(skyEntries.length).toBeGreaterThanOrEqual(2);
   const skyPaths = new Set(skyEntries.map((game: { relative_path: string }) => game.relative_path));
   expect(skyPaths.size).toBe(skyEntries.length);
+  // Copies of one game must be tellable apart by description alone: it is the only
+  // field ScummVM's launcher and the overview page put in front of the user.
+  const skyDescriptions = new Set(
+    skyEntries.map((game: { description: string }) => game.description),
+  );
+  expect(skyDescriptions.size).toBe(skyEntries.length);
+  expect([...skyDescriptions].every((description) => description.includes('BASS-Floppy-1.3'))).toBe(
+    true,
+  );
 
   await page.goto('/games.html');
   const gameLink = page.locator('a.game-entry[href*="/data/games/"]').first();

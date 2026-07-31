@@ -13,6 +13,10 @@ from collections.abc import Iterable
 
 LOG = logging.getLogger("merge_ini")
 
+LABEL_OPEN = " ["
+LABEL_CLOSE = "]"
+LABEL_BOUNDARIES = " -_/."
+
 
 def read_config(path: str) -> configparser.ConfigParser:
     parser = configparser.ConfigParser(strict=False, interpolation=None)
@@ -58,6 +62,85 @@ def identity(values: dict[str, str], mappings: list[tuple[str, str]]) -> tuple[s
         return None
     normalized_path = mapped_path(path, mappings) or posixpath.normpath(path)
     return values.get("engineid", ""), values.get("gameid", ""), normalized_path
+
+
+def catalog_relative(path: str, mappings: list[tuple[str, str]]) -> str:
+    if not path:
+        return ""
+    path = posixpath.normpath(path)
+    for _, destination in mappings:
+        if path.startswith(destination + "/"):
+            return path[len(destination) + 1 :]
+    return posixpath.basename(path)
+
+
+def labelled_description(base: str, label: str) -> str:
+    return f"{base}{LABEL_OPEN}{label}{LABEL_CLOSE}"
+
+
+def is_labelled(description: str, base: str) -> bool:
+    return description.startswith(base + LABEL_OPEN) and description.endswith(LABEL_CLOSE)
+
+
+def distinguishing_labels(paths: list[str]) -> dict[str, str]:
+    """Shortest directory suffixes that tell copies of one game apart.
+
+    Copies usually sit in directories differing only at the end ("... with Midi
+    Music" / "... with Special Edition CD Tracks"), so dropping the shared head keeps
+    labels short enough to stay readable where ScummVM clips long descriptions. The
+    whole group falls back to full paths whenever trimming leaves any member without
+    letters ("BASS-Floppy-1.3" / "…-1.3-second-copy" would otherwise label the first
+    copy "3"), so labels within a group stay consistent with each other.
+    """
+    shared = os.path.commonprefix(paths)
+    while shared and shared[-1] not in LABEL_BOUNDARIES:
+        shared = shared[:-1]
+
+    labels = {}
+    for path in paths:
+        label = path[len(shared) :].lstrip(LABEL_BOUNDARIES)
+        if not any(character.isalpha() for character in label):
+            return {path: path for path in paths}
+        labels[path] = label
+    return labels
+
+
+def label_duplicate_descriptions(
+    target: configparser.ConfigParser, mappings: list[tuple[str, str]]
+) -> bool:
+    """Append the game directory to descriptions shared by several targets.
+
+    ScummVM's launcher and the browser catalog both list targets by description, so
+    two directories holding the same release are indistinguishable there even though
+    their sections were suffixed. Existing text is kept as the prefix — only the
+    directory is appended — and entries that already carry a label are left alone,
+    which makes the pass idempotent across boots.
+    """
+    entries = []
+    for section in target.sections():
+        if section == "scummvm":
+            continue
+        values = section_values(target, section)
+        description = values.get("description")
+        folder = catalog_relative(values.get("path", ""), mappings)
+        if description and folder:
+            entries.append((section, description, folder))
+
+    changed = False
+    for section, description, folder in entries:
+        # Includes this section itself, plus any copy already labelled on a past boot.
+        group = {
+            other_folder
+            for _, other_description, other_folder in entries
+            if other_description == description or is_labelled(other_description, description)
+        }
+        if len(group) < 2:
+            continue
+        label = distinguishing_labels(sorted(group))[folder]
+        target.set(section, "description", labelled_description(description, label))
+        LOG.info("Labelled %s as %r to tell copies apart", section, label)
+        changed = True
+    return changed
 
 
 def atomic_write(parser: configparser.ConfigParser, target_path: str) -> None:
@@ -146,6 +229,10 @@ def merge_ini(
         changed = True
         added += 1
         LOG.info("Added detected target %s as %s", detected_section, target_section)
+
+    # Runs unconditionally so copies registered before this existed get labelled too.
+    if label_duplicate_descriptions(target, mappings):
+        changed = True
 
     if changed:
         atomic_write(target, target_path)
