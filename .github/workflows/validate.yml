@@ -1,0 +1,63 @@
+name: Validate
+
+on:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Git ref to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    concurrency:
+      group: validate-${{ inputs.checkout_ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref }}
+          persist-credentials: false
+
+      - name: Load source versions
+        run: cat versions.env >> "$GITHUB_ENV"
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests/unit -v
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build test image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          load: true
+          tags: scummvm-web:test
+          build-args: |
+            SCUMMVM_DEMO_SHA=${{ env.SCUMMVM_DEMO_SHA }}
+            SCUMMVM_SHA=${{ env.SCUMMVM_SHA }}
+            SCUMMVM_ICONS_SHA=${{ env.SCUMMVM_ICONS_SHA }}
+            EMSDK_VERSION=${{ env.EMSDK_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Fetch test game
+        run: tests/fetch-fixture.sh
+
+      - name: Run smoke tests
+        run: docker compose --file tests/compose.yaml run --rm smoke
+
+      - name: Reject persistence symlinks
+        run: tests/test-persist-symlink.sh
+
+      - name: Stop test stack
+        if: always()
+        run: docker compose --file tests/compose.yaml down --volumes
