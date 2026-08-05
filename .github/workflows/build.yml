@@ -9,6 +9,10 @@ on:
       - 'renovate.json'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - 'renovate.json'
   workflow_dispatch:
 
 permissions:
