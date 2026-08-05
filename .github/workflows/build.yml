@@ -3,6 +3,10 @@ name: Build, test, and publish
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - 'renovate.json'
   pull_request:
     branches: [main]
   workflow_dispatch:
