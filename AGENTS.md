@@ -178,6 +178,32 @@ the NAS is down). Storage is NFS from `nas.techno.bot`:
 `/mnt/vault/data/emulation/scummvm/{games,persist}`. Renovate auto-merges digest
 bumps for `/philmichel/` images.
 
+**Upstream watch prerequisite.** `upstream-watch.yml` opens its `bump/upstream`
+PR with the built-in `GITHUB_TOKEN`, which only works while the repo setting
+*Settings → Actions → General → "Allow GitHub Actions to create and approve pull
+requests"* is on (enabled 2026-09-25). Job-level `permissions:` in the workflow
+cannot override it. The workflow exits early on days upstream has not moved, so
+a disabled toggle only surfaces as `GitHub Actions is not permitted to create or
+approve pull requests` once there is actually something to bump. Check and fix:
+
+```bash
+gh api repos/philmichel/scummvm-web/actions/permissions/workflow   # can_approve_pull_request_reviews must be true
+gh api -X PUT repos/philmichel/scummvm-web/actions/permissions/workflow \
+  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true
+```
+
+The watch also bumps `EMSDK_VERSION` to the default in upstream's
+`dists/emscripten/build.sh`. Our pin overrides that default, and upstream drops
+toolchain workarounds in the same commit that bumps Emscripten, so a source bump
+on an older emsdk can build fine and still crash in the browser (seen 2026-10-14:
+`TextDecoder` "ArrayBuffer value must not be resizable" on 6.0.2).
+
+If the watch fails in `validate` with `emscripten-fs-factory.js: FAILED`, upstream
+changed the file the overlay replaces. Diff the upstream file between the old and
+new `SCUMMVM_SHA`, port what matters into the overlay, update
+`overlay/checksums.sha256`, and land it in the same PR as the pin bump — the new
+checksum only matches at the new pins.
+
 ## Debugging recipes
 
 ```bash
