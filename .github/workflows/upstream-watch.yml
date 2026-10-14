@@ -36,9 +36,20 @@ jobs:
           scummvm_sha=$(gh api "repos/chkuendig/scummvm-demo/contents/scummvm?ref=$demo_sha" --jq .sha)
           icons_sha=$(gh api "repos/chkuendig/scummvm-demo/contents/scummvm-icons?ref=$demo_sha" --jq .sha)
 
+          # Our EMSDK_VERSION overrides upstream's default, and upstream drops
+          # toolchain workarounds when it bumps, so follow its default.
+          emsdk_version=$(curl --fail --silent --show-error --location \
+            "https://raw.githubusercontent.com/chkuendig/scummvm/$scummvm_sha/dists/emscripten/build.sh" \
+            | sed -n 's/^EMSDK_VERSION="\${EMSDK_VERSION:-\([^}]*\)}"$/\1/p')
+          if [[ ! "$emsdk_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Could not read upstream EMSDK_VERSION default: '$emsdk_version'" >&2
+            exit 1
+          fi
+
           if [[ "$demo_sha" == "$SCUMMVM_DEMO_SHA" \
               && "$scummvm_sha" == "$SCUMMVM_SHA" \
-              && "$icons_sha" == "$SCUMMVM_ICONS_SHA" ]]; then
+              && "$icons_sha" == "$SCUMMVM_ICONS_SHA" \
+              && "$emsdk_version" == "$EMSDK_VERSION" ]]; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -63,6 +74,7 @@ jobs:
           sed -i "s/^SCUMMVM_DEMO_SHA=.*/SCUMMVM_DEMO_SHA=$demo_sha/" versions.env
           sed -i "s/^SCUMMVM_SHA=.*/SCUMMVM_SHA=$scummvm_sha/" versions.env
           sed -i "s/^SCUMMVM_ICONS_SHA=.*/SCUMMVM_ICONS_SHA=$icons_sha/" versions.env
+          sed -i "s/^EMSDK_VERSION=.*/EMSDK_VERSION=$emsdk_version/" versions.env
           echo 'changed=true' >> "$GITHUB_OUTPUT"
           echo "overlay_status=$overlay_status" >> "$GITHUB_OUTPUT"
 
@@ -78,7 +90,7 @@ jobs:
           commit-message: 'chore(upstream): update ScummVM sources'
           title: 'chore(upstream): update ScummVM sources'
           body: |
-            Updates the pinned demo, ScummVM, and icon repositories to the gitlinks on upstream `main`.
+            Updates the pinned demo, ScummVM, and icon repositories to the gitlinks on upstream `main`, and `EMSDK_VERSION` to upstream's `dists/emscripten/build.sh` default.
 
             ${{ steps.update.outputs.overlay_status }}
 
