@@ -607,8 +607,18 @@ mergeInto(LibraryManager.library, {
         // downloader remains authoritative when a prefetched chunk is absent.
         inflight: new Set(),
 
+        // FS.analyzePath is deprecated upstream; FS.stat throws when absent.
+        exists: function(path) {
+            try {
+                FS.stat(path);
+                return true;
+            } catch (error) {
+                return false;
+            }
+        },
+
         prefetch: async function(url, chunkPath, start, length) {
-            if (VFSPREFETCH.inflight.has(chunkPath) || FS.analyzePath(chunkPath).exists) {
+            if (VFSPREFETCH.inflight.has(chunkPath) || VFSPREFETCH.exists(chunkPath)) {
                 return;
             }
             VFSPREFETCH.inflight.add(chunkPath);
@@ -628,7 +638,7 @@ mergeInto(LibraryManager.library, {
                 // Synchronous block from here: single-threaded, so the C++
                 // downloader cannot interleave between check and write. Bail
                 // if it already created the file or holds it open mid-write.
-                if (FS.analyzePath(chunkPath).exists) {
+                if (VFSPREFETCH.exists(chunkPath)) {
                     return;
                 }
                 for (const stream of FS.streams) {
