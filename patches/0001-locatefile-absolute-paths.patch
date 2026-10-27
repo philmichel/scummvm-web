@@ -1,7 +1,9 @@
---- a/dists/emscripten/custom_shell-pre.js	2026-07-31 03:03:35.503010646 -0700
-+++ b/dists/emscripten/custom_shell-pre.js	2026-07-31 03:03:42.949345285 -0700
-@@ -1,6 +1,13 @@
- /*global Module*/
+diff --git a/dists/emscripten/custom_shell-pre.js b/dists/emscripten/custom_shell-pre.js
+index ff6824e5..6a5ab26f 100644
+--- a/dists/emscripten/custom_shell-pre.js
++++ b/dists/emscripten/custom_shell-pre.js
+@@ -6,6 +6,13 @@ window.addEventListener("hashchange", function () {
+ 
  Module["arguments"] = [];
  
 +// dlopen()ed plugins pass absolute virtual-filesystem paths
